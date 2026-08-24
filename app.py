@@ -59,12 +59,12 @@ def cargar_datos():
             df["Legajo"] = df["Legajo"].astype(str).str.strip()
         return df
     except Exception as e:
-        st.error(f"Error al leer la planilla: {e}")
+        # Mostramos la excepción exacta para saber qué falta
+        st.error(f"Error detallado al leer la planilla: {type(e).__name__} - {e}")
         return pd.DataFrame(columns=[
             "Legajo", "Empleado", "Area", "Tipo_Licencia", 
             "Periodo", "Fecha_Inicio", "Fecha_Fin", "Dias", "Observaciones"
         ])
-
 df_licencias = cargar_datos()
 
 # -----------------------------------------------------------------------------
