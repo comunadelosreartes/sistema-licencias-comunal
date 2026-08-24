@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
+import json
 from datetime import date
-from streamlit_gsheets import GSheetsConnection
+from google.oauth2.service_account import Credentials
+import gspread
 
 # -----------------------------------------------------------------------------
 # CONFIGURACIÓN DE PÁGINA
@@ -12,18 +14,44 @@ st.set_page_config(
     layout="wide"
 )
 
-# Conexión con la pestaña Historial_Licencias que acabamos de crear
-conn = st.connection("gsheets", type=GSheetsConnection)
+# -----------------------------------------------------------------------------
+# CONEXIÓN DIRECTA A GOOGLE SHEETS VIA SECRETS JSON
+# -----------------------------------------------------------------------------
+@st.cache_resource
+def obtener_cliente_gspread():
+    try:
+        # Lee la sección 'service_account' cruda desde los Secrets
+        sa_info = dict(st.secrets["service_account"])
+        if "private_key" in sa_info:
+            sa_info["private_key"] = sa_info["private_key"].replace("\\n", "\n")
+        
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive"
+        ]
+        creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
+        return gspread.authorize(creds)
+    except Exception as e:
+        st.error(f"Error al autenticar con Google Cloud: {e}")
+        return None
 
 def cargar_datos():
+    gc = obtener_cliente_gspread()
+    if not gc:
+        return pd.DataFrame()
+    
     try:
-        df = conn.read(worksheet="Historial_Licencias", ttl=0)
-        # Limpiar datos
+        sheet_url = st.secrets["spreadsheet_url"]
+        sh = gc.open_by_url(sheet_url)
+        worksheet = sh.worksheet("Historial_Licencias")
+        data = worksheet.get_all_records()
+        df = pd.DataFrame(data)
+        
         if not df.empty and "Legajo" in df.columns:
             df["Legajo"] = df["Legajo"].astype(str).str.strip()
         return df
     except Exception as e:
-        st.error(f"Error al leer la base de Google Sheets: {e}")
+        st.error(f"Error al leer la planilla de Google Sheets: {e}")
         return pd.DataFrame(columns=[
             "Legajo", "Empleado", "Area", "Tipo_Licencia", 
             "Periodo", "Fecha_Inicio", "Fecha_Fin", "Dias", "Observaciones"
@@ -48,8 +76,6 @@ if opcion == "📜 Historial por Legajo":
     st.caption("Consulte el detalle de vacaciones y licencias gozadas por cada agente comunal.")
 
     if not df_licencias.empty and "Legajo" in df_licencias.columns and df_licencias["Legajo"].dropna().count() > 0:
-        
-        # Crear lista combinada Legajo - Nombre para el selector
         df_licencias["Combo_Agente"] = df_licencias["Legajo"].astype(str) + " - " + df_licencias["Empleado"].astype(str)
         lista_agentes = sorted(df_licencias["Combo_Agente"].unique().tolist())
 
@@ -60,14 +86,12 @@ if opcion == "📜 Historial por Legajo":
         legajo_elegido = agente_sel.split(" - ")[0].strip()
         df_agente = df_licencias[df_licencias["Legajo"] == legajo_elegido].copy()
 
-        # Datos del agente
         nombre_agente = df_agente["Empleado"].iloc[0] if not df_agente.empty else "N/A"
         area_agente = df_agente["Area"].iloc[0] if ("Area" in df_agente.columns and not df_agente.empty) else "N/A"
         total_dias = pd.to_numeric(df_agente["Dias"], errors="coerce").sum() if not df_agente.empty else 0
 
         st.divider()
 
-        # Resumen general
         c1, c2, c3 = st.columns(3)
         c1.metric("N° Legajo", legajo_elegido)
         c2.metric("Área / Sector", area_agente)
@@ -94,9 +118,8 @@ if opcion == "📜 Historial por Legajo":
             )
         else:
             st.info("No hay licencias registradas para este legajo.")
-
     else:
-        st.info("💡 La base de datos aún no tiene licencias registradas. Utilice la opción '➕ Cargar Licencia' del menú para agregar la primera.")
+        st.info("💡 La base de datos aún no tiene licencias registradas.")
 
 # =============================================================================
 # OPCIÓN 2: FORMULARIO DE CARGA DE LICENCIA
@@ -125,7 +148,7 @@ elif opcion == "➕ Cargar Licencia":
         with col4:
             f_fin_in = st.date_input("Fecha Fin (Hasta):", value=date.today())
 
-        obs_in = st.text_input("Observaciones / N° Resolución o Nota:", placeholder="Ej: Tramo completo / Solicitud 45")
+        obs_in = st.text_input("Observaciones / N° Resolución o Nota:", placeholder="Ej: Tramo completo")
 
         btn_guardar = st.form_submit_button("💾 Guardar Licencia en Google Sheets", type="primary")
 
@@ -133,22 +156,23 @@ elif opcion == "➕ Cargar Licencia":
             if not legajo_in.strip() or not nombre_in.strip():
                 st.error("⚠️ El Legajo y el Nombre del Empleado son obligatorios.")
             else:
-                nuevo_reg = pd.DataFrame([{
-                    "Legajo": legajo_in.strip(),
-                    "Empleado": nombre_in.strip(),
-                    "Area": area_in.strip(),
-                    "Tipo_Licencia": tipo_in,
-                    "Periodo": periodo_in.strip(),
-                    "Fecha_Inicio": f_inicio_in.strftime("%Y-%m-%d"),
-                    "Fecha_Fin": f_fin_in.strftime("%Y-%m-%d"),
-                    "Dias": int(dias_in),
-                    "Observaciones": obs_in.strip()
-                }])
+                nuevo_registro = [
+                    legajo_in.strip(),
+                    nombre_in.strip(),
+                    area_in.strip(),
+                    tipo_in,
+                    periodo_in.strip(),
+                    f_inicio_in.strftime("%Y-%m-%d"),
+                    f_fin_in.strftime("%Y-%m-%d"),
+                    int(dias_in),
+                    obs_in.strip()
+                ]
 
                 try:
-                    df_actual = cargar_datos()
-                    df_unido = pd.concat([df_actual, nuevo_reg], ignore_index=True)
-                    conn.update(worksheet="Historial_Licencias", data=df_unido)
+                    gc = obtener_cliente_gspread()
+                    sh = gc.open_by_url(st.secrets["spreadsheet_url"])
+                    ws = sh.worksheet("Historial_Licencias")
+                    ws.append_row(nuevo_registro)
                     st.success(f"🎉 ¡Licencia registrada correctamente para {nombre_in.strip()}!")
                     st.rerun()
                 except Exception as e:
