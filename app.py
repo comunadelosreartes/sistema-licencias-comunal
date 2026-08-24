@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import json
 from datetime import date
 from google.oauth2.service_account import Credentials
 import gspread
@@ -15,16 +14,23 @@ st.set_page_config(
 )
 
 # -----------------------------------------------------------------------------
-# CONEXIÓN DIRECTA A GOOGLE SHEETS VIA SECRETS JSON
+# CONEXIÓN A GOOGLE SHEETS
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def obtener_cliente_gspread():
     try:
-        # Lee la sección 'service_account' cruda desde los Secrets
         sa_info = dict(st.secrets["service_account"])
-        if "private_key" in sa_info:
-            sa_info["private_key"] = sa_info["private_key"].replace("\\n", "\n")
         
+        # Corregir saltos de línea de la private_key
+        if "private_key" in sa_info:
+            key = sa_info["private_key"]
+            key = key.replace("\\n", "\n")
+            if not key.startswith("-----BEGIN PRIVATE KEY-----"):
+                key = "-----BEGIN PRIVATE KEY-----\n" + key
+            if not key.endswith("-----END PRIVATE KEY-----\n") and not key.endswith("-----END PRIVATE KEY-----"):
+                key = key + "\n-----END PRIVATE KEY-----\n"
+            sa_info["private_key"] = key
+
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
             "https://www.googleapis.com/auth/drive"
@@ -32,7 +38,7 @@ def obtener_cliente_gspread():
         creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
         return gspread.authorize(creds)
     except Exception as e:
-        st.error(f"Error al autenticar con Google Cloud: {e}")
+        st.error(f"Error de Autenticación: {e}")
         return None
 
 def cargar_datos():
@@ -44,6 +50,8 @@ def cargar_datos():
         sheet_url = st.secrets["spreadsheet_url"]
         sh = gc.open_by_url(sheet_url)
         worksheet = sh.worksheet("Historial_Licencias")
+        
+        # Leer filas
         data = worksheet.get_all_records()
         df = pd.DataFrame(data)
         
@@ -51,7 +59,7 @@ def cargar_datos():
             df["Legajo"] = df["Legajo"].astype(str).str.strip()
         return df
     except Exception as e:
-        st.error(f"Error al leer la planilla de Google Sheets: {e}")
+        st.error(f"Error al leer la planilla: {e}")
         return pd.DataFrame(columns=[
             "Legajo", "Empleado", "Area", "Tipo_Licencia", 
             "Periodo", "Fecha_Inicio", "Fecha_Fin", "Dias", "Observaciones"
@@ -99,27 +107,24 @@ if opcion == "📜 Historial por Legajo":
 
         st.subheader(f"📋 Registros de {nombre_agente}")
         
-        if not df_agente.empty:
-            columnas_visibles = ["Periodo", "Tipo_Licencia", "Fecha_Inicio", "Fecha_Fin", "Dias", "Observaciones"]
-            df_mostrar = df_agente[columnas_visibles].sort_values(by="Periodo", ascending=False)
-            
-            st.dataframe(
-                df_mostrar,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "Periodo": "Período / Año",
-                    "Tipo_Licencia": "Tipo",
-                    "Fecha_Inicio": "Desde",
-                    "Fecha_Fin": "Hasta",
-                    "Dias": "Días",
-                    "Observaciones": "Observaciones / Ref."
-                }
-            )
-        else:
-            st.info("No hay licencias registradas para este legajo.")
+        columnas_visibles = ["Periodo", "Tipo_Licencia", "Fecha_Inicio", "Fecha_Fin", "Dias", "Observaciones"]
+        df_mostrar = df_agente[columnas_visibles].sort_values(by="Periodo", ascending=False)
+        
+        st.dataframe(
+            df_mostrar,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Periodo": "Período / Año",
+                "Tipo_Licencia": "Tipo",
+                "Fecha_Inicio": "Desde",
+                "Fecha_Fin": "Hasta",
+                "Dias": "Días",
+                "Observaciones": "Observaciones / Ref."
+            }
+        )
     else:
-        st.info("💡 La base de datos aún no tiene licencias registradas.")
+        st.info("💡 La base de datos está conectada pero aún no tiene licencias cargadas. Usá la opción '➕ Cargar Licencia' para agregar la primera.")
 
 # =============================================================================
 # OPCIÓN 2: FORMULARIO DE CARGA DE LICENCIA
@@ -188,4 +193,4 @@ elif opcion == "📊 Ver Base Completa":
     if not df_licencias.empty:
         st.dataframe(df_licencias, use_container_width=True, hide_index=True)
     else:
-        st.info("La base de datos está vacía.")
+        st.info("La base de datos no contiene registros.")
