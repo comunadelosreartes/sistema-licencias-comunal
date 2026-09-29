@@ -8,7 +8,7 @@ from datetime import datetime, date
 st.set_page_config(page_title="Sistema de Licencias Comunal", page_icon="📜", layout="wide")
 
 # Enlace directo de tu Google Sheets (Reemplazar con tu URL real)
-URL_SHEET = "https://docs.google.com/spreadsheets/d/10pb1_QNhfX5V-f5iH_TAewt1cC3XcY46WAVMY9HzcUs/edit?gid=0#gid=0"
+URL_SHEET = "https://docs.google.com/spreadsheets/d/10pb1_QNhfX5V-f5iH_TAewt1cC3XcY46WAVMY9HzcUs/edit"
 
 # Conexión a Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
