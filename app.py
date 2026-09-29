@@ -16,7 +16,7 @@ st.set_page_config(
 )
 
 # -----------------------------------------------------------------------------
-# CONEXIÓN A GOOGLE SHEETS VIA GSPREAD (SECRETS EXISTENTES)
+# CONEXIÓN A GOOGLE SHEETS VIA GSPREAD
 # -----------------------------------------------------------------------------
 @st.cache_resource
 def obtener_cliente_gspread():
@@ -79,7 +79,7 @@ def cargar_todas_las_solapas():
 df_emp, df_saldos, df_hist, df_feriados, df_config = cargar_todas_las_solapas()
 
 # -----------------------------------------------------------------------------
-# FUNCIONES AUXILIARES DE CÁLCULO Y REGLAS (ESTATUTO & CONFIGURACIÓN)
+# FUNCIONES AUXILIARES DE CÁLCULO Y REGLAS
 # -----------------------------------------------------------------------------
 def obtener_config(parametro, valor_default):
     if not df_config.empty and 'Parametro' in df_config.columns:
@@ -94,12 +94,35 @@ def obtener_config(parametro, valor_default):
 MAX_TRAMITE_ANUAL = int(obtener_config("MAX_DIAS_TRAMITE_ANUAL", 8))
 
 def obtener_feriados_set():
+    feriados = set()
+    # Feriados nacionales inamovibles base (para asegurar fechas clave como Navidad y Año Nuevo)
+    anio_curr = date.today().year
+    for y in range(anio_curr - 2, anio_curr + 3):
+        feriados.add(date(y, 1, 1))   # Año Nuevo
+        feriados.add(date(y, 3, 24))  # Memoria
+        feriados.add(date(y, 4, 2))   # Malvinas
+        feriados.add(date(y, 5, 1))   # Trabajo
+        feriados.add(date(y, 5, 25))  # Revolución
+        feriados.add(date(y, 6, 20))  # Belgrano
+        feriados.add(date(y, 7, 9))   # Independencia
+        feriados.add(date(y, 12, 8))  # Inmaculada
+        feriados.add(date(y, 12, 25)) # Navidad
+
     if not df_feriados.empty and 'Fecha' in df_feriados.columns:
-        try:
-            return set(pd.to_datetime(df_feriados['Fecha'], dayfirst=True, errors='coerce').dt.date)
-        except:
-            return set()
-    return set()
+        for val in df_feriados['Fecha'].dropna():
+            val_str = str(val).strip()
+            if not val_str:
+                continue
+            dt = None
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%m/%d/%Y"):
+                try:
+                    dt = datetime.strptime(val_str, fmt).date()
+                    break
+                except ValueError:
+                    pass
+            if dt:
+                feriados.add(dt)
+    return feriados
 
 FERIADOS_SET = obtener_feriados_set()
 
@@ -150,6 +173,36 @@ def calcular_dias_estatuto(fecha_antiguedad, anio_periodo):
         return 30
     else:
         return 35
+
+def obtener_resumen_saldos_agente(legajo_sel, emp_info):
+    saldos_user = df_saldos[df_saldos['Legajo'] == legajo_sel].copy() if not df_saldos.empty else pd.DataFrame()
+    hist_user = df_hist[df_hist['Legajo'] == legajo_sel].copy() if not df_hist.empty else pd.DataFrame()
+    
+    tomados_por_periodo = {}
+    if not hist_user.empty and 'Tipo_Licencia' in hist_user.columns:
+        hist_user['Dias'] = pd.to_numeric(hist_user['Dias'], errors='coerce').fillna(0)
+        vacs = hist_user[hist_user['Tipo_Licencia'].astype(str).str.contains("Vacaciones|Ordinaria", case=False, na=False)]
+        if not vacs.empty and 'Periodo' in vacs.columns:
+            tomados_por_periodo = vacs.groupby('Periodo')['Dias'].sum().to_dict()
+            
+    periodos_posibles = sorted(list(set(saldos_user['Periodo'].tolist() if not saldos_user.empty else [2024, 2025, 2026])))
+    
+    resumen = []
+    for p in periodos_posibles:
+        try:
+            p_num = int(p)
+        except:
+            p_num = p
+            
+        if not saldos_user.empty and p in saldos_user['Periodo'].values:
+            asig = saldos_user[saldos_user['Periodo'] == p]['Dias_Asignados'].sum()
+        else:
+            asig = calcular_dias_estatuto(emp_info.get('FECHA ANTIGUEDAD'), p_num if isinstance(p_num, int) else date.today().year)
+            
+        tomados = tomados_por_periodo.get(p, 0)
+        disp = asig - tomados
+        resumen.append({"Periodo": p, "Asignados": int(asig), "Tomados": int(tomados), "Disponible": int(disp)})
+    return resumen
 
 def generar_html_impresion(legajo, nombre, dni, area, tipo_lic, periodo, dias, f_inicio, f_fin, obs):
     return f"""
@@ -282,40 +335,14 @@ if opcion == "📜 Historial y Saldos por Legajo":
             c2.metric("D.N.I.", str(emp_info.get('DNI', 'N/A')))
             c3.metric("Fecha Antigüedad", str(emp_info.get('FECHA ANTIGUEDAD', 'N/A')))
             
-            saldos_user = df_saldos[df_saldos['Legajo'] == legajo_sel].copy() if not df_saldos.empty else pd.DataFrame()
-            hist_user = df_hist[df_hist['Legajo'] == legajo_sel].copy() if not df_hist.empty else pd.DataFrame()
-            
             st.divider()
             st.subheader("🟢 Estado de Saldos de Vacaciones")
             
-            tomados_por_periodo = {}
-            if not hist_user.empty and 'Tipo_Licencia' in hist_user.columns:
-                hist_user['Dias'] = pd.to_numeric(hist_user['Dias'], errors='coerce').fillna(0)
-                vacs = hist_user[hist_user['Tipo_Licencia'].astype(str).str.contains("Vacaciones|Ordinaria", case=False, na=False)]
-                if not vacs.empty and 'Periodo' in vacs.columns:
-                    tomados_por_periodo = vacs.groupby('Periodo')['Dias'].sum().to_dict()
-                    
-            periodos = sorted(list(set(saldos_user['Periodo'].tolist() if not saldos_user.empty else [2024, 2025, 2026])))
-            
-            resumen_saldos = []
-            for p in periodos:
-                try:
-                    p_num = int(p)
-                except:
-                    p_num = p
-                
-                if not saldos_user.empty and p in saldos_user['Periodo'].values:
-                    asig = saldos_user[saldos_user['Periodo'] == p]['Dias_Asignados'].sum()
-                else:
-                    asig = calcular_dias_estatuto(emp_info.get('FECHA ANTIGUEDAD'), p_num if isinstance(p_num, int) else 2026)
-                
-                tomados = tomados_por_periodo.get(p, 0)
-                disp = asig - tomados
-                resumen_saldos.append({"Período": p, "Días Asignados": asig, "Días Tomados": tomados, "Saldo Disponible": disp})
-                
+            resumen_saldos = obtener_resumen_saldos_agente(legajo_sel, emp_info)
             df_res_saldos = pd.DataFrame(resumen_saldos)
             st.dataframe(df_res_saldos, use_container_width=True, hide_index=True)
             
+            hist_user = df_hist[df_hist['Legajo'] == legajo_sel].copy() if not df_hist.empty else pd.DataFrame()
             if not hist_user.empty and 'Tipo_Licencia' in hist_user.columns:
                 hist_user['Dias'] = pd.to_numeric(hist_user['Dias'], errors='coerce').fillna(0)
                 anio_actual = date.today().year
@@ -365,7 +392,7 @@ if opcion == "📜 Historial y Saldos por Legajo":
 # =============================================================================
 elif opcion == "➕ Cargar Licencia":
     st.title("➕ Registrar Nueva Licencia")
-    st.caption("Asiente solicitudes de licencias o vacaciones con pre-cálculo automático e impresión.")
+    st.caption("Asiente solicitudes de licencias con cálculo de saldos y feriados automatizado.")
 
     if not df_emp_activos.empty:
         opciones_empleados = dict(zip(df_emp_activos['LEGAJO'], df_emp_activos['LEGAJO'] + " - " + df_emp_activos['NOMBRE_COMPLETO']))
@@ -373,9 +400,37 @@ elif opcion == "➕ Cargar Licencia":
         legajo_sel = st.selectbox("Empleado / Agente:", options=list(opciones_empleados.keys()), format_func=lambda x: opciones_empleados[x])
         emp_info = df_emp_activos[df_emp_activos['LEGAJO'] == legajo_sel].iloc[0]
         
+        # ---------------------------------------------------------------------
+        # TARJETA DE SALDOS DISPONIBLES EN TIEMPO REAL
+        # ---------------------------------------------------------------------
+        resumen_saldos = obtener_resumen_saldos_agente(legajo_sel, emp_info)
+        
+        st.markdown("##### 💡 Saldos Pendientes de Vacaciones para este Agente:")
+        cols_saldos = st.columns(len(resumen_saldos))
+        for idx, r in enumerate(resumen_saldos):
+            cols_saldos[idx].metric(
+                label=f"Período {r['Periodo']}",
+                value=f"{r['Disponible']} días",
+                delta=f"Tomados: {r['Tomados']} / {r['Asignados']}",
+                delta_color="normal"
+            )
+        
+        st.divider()
+
         col_t1, col_t2 = st.columns(2)
         tipo_lic = col_t1.selectbox("Tipo de Licencia:", ["Vacaciones", "Día de Trámite", "Licencia Médica", "Razones Particulares", "Otra"])
-        periodo_lic = col_t2.text_input("Periodo (Año):", value=str(date.today().year))
+        
+        # Selección de período dinámica con etiquetas de saldo disponible
+        opciones_periodo = {}
+        for r in resumen_saldos:
+            p_val = str(r['Periodo'])
+            opciones_periodo[p_val] = f"Año {p_val} (Disponible: {r['Disponible']} días hábiles)"
+            
+        periodo_lic = col_t2.selectbox(
+            "Período Correspondiente (Año):",
+            options=list(opciones_periodo.keys()),
+            format_func=lambda x: opciones_periodo[x]
+        )
         
         # Modalidad de Selección de Fechas
         modo_fechas = st.radio("Modalidad de Cálculo de Fechas:", ["Por Rango (Desde / Hasta)", "Por Cantidad de Días Hábiles (Desde + N° Días)"], horizontal=True)
@@ -409,7 +464,11 @@ elif opcion == "➕ Cargar Licencia":
         col_p2.metric("Fecha Fin (inclusive)", f_fin.strftime("%d/%m/%Y"))
         col_p3.metric("Días Hábiles Computados", f"{dias_habiles} día(s)")
 
-        valido = True
+        # Validación contra saldo disponible
+        saldo_periodo_sel = next((r['Disponible'] for r in resumen_saldos if str(r['Periodo']) == str(periodo_lic)), 0)
+        if tipo_lic == "Vacaciones" and dias_habiles > saldo_periodo_sel:
+            st.warning(f"⚠️ **Atención:** La cantidad solicitada ({dias_habiles} días) supera el saldo disponible para el período {periodo_lic} ({saldo_periodo_sel} días).")
+
         if tipo_lic == "Día de Trámite":
             hist_user = df_hist[df_hist['Legajo'] == legajo_sel] if not df_hist.empty else pd.DataFrame()
             if not hist_user.empty and 'Tipo_Licencia' in hist_user.columns:
@@ -419,7 +478,7 @@ elif opcion == "➕ Cargar Licencia":
                 tramites_anio = hist_user[filtro_tipo & filtro_anio]['Dias'].sum()
                 
                 if tramites_anio + dias_habiles > MAX_TRAMITE_ANUAL:
-                    st.warning(f"⚠️️ Alerta: Con esta solicitud superará el máximo anual de Días de Trámite ({MAX_TRAMITE_ANUAL} días). Actualmente registra {int(tramites_anio)} días tomados.")
+                    st.warning(f"⚠️ **Alerta:** Con esta solicitud superará el máximo anual de Días de Trámite ({MAX_TRAMITE_ANUAL} días). Actualmente registra {int(tramites_anio)} días tomados.")
 
         # Guardar en Google Sheets
         if st.button("💾 Guardar Licencia en Google Sheets", type="primary"):
