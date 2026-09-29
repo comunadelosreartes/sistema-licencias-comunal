@@ -7,24 +7,25 @@ from datetime import datetime, date
 # Configuración de página
 st.set_page_config(page_title="Sistema de Licencias Comunal", page_icon="📜", layout="wide")
 
+# Enlace directo de tu Google Sheets (Reemplazar con tu URL real)
+URL_SHEET = "https://docs.google.com/spreadsheets/d/10pb1_QNhfX5V-f5iH_TAewt1cC3XcY46WAVMY9HzcUs/edit?gid=0#gid=0"
+
 # Conexión a Google Sheets
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 @st.cache_data(ttl=60)
 def cargar_datos():
-    # Carga de solapas
-    df_emp = conn.read(worksheet="Empleados")
-    df_saldos = conn.read(worksheet="Saldos_Iniciales")
-    df_hist = conn.read(worksheet="Historial_Licencias")
-    df_feriados = conn.read(worksheet="Feriados")
-    df_config = conn.read(worksheet="Configuracion")
-    
+    df_emp = conn.read(spreadsheet=URL_SHEET, worksheet="Empleados")
+    df_saldos = conn.read(spreadsheet=URL_SHEET, worksheet="Saldos_Iniciales")
+    df_hist = conn.read(spreadsheet=URL_SHEET, worksheet="Historial_Licencias")
+    df_feriados = conn.read(spreadsheet=URL_SHEET, worksheet="Feriados")
+    df_config = conn.read(spreadsheet=URL_SHEET, worksheet="Configuracion")
     return df_emp, df_saldos, df_hist, df_feriados, df_config
 
 try:
     df_emp, df_saldos, df_hist, df_feriados, df_config = cargar_datos()
 except Exception as e:
-    st.error(f"Error al conectar con Google Sheets. Verifique la estructura de solapas: {e}")
+    st.error(f"Error al conectar con Google Sheets. Verifique la estructura de solapas y la URL: {e}")
     st.stop()
 
 # --- HELPER FUNCTIONS ---
@@ -119,7 +120,6 @@ if opcion == "📜 Historial y Saldos por Legajo":
         st.markdown("---")
         st.subheader("🟢 Estado de Saldos de Vacaciones")
         
-        # Agrupar tomados por período
         tomados_por_periodo = {}
         if not hist_user.empty and 'Tipo_Licencia' in hist_user.columns:
             vacs = hist_user[hist_user['Tipo_Licencia'] == 'Vacaciones']
@@ -179,7 +179,6 @@ elif opcion == "➕ Cargar Licencia":
                 dias_habiles = calcular_dias_habiles(f_inicio, f_fin)
                 emp_info = df_emp_activos[df_emp_activos['LEGAJO'] == legajo_sel].iloc[0]
                 
-                # Validaciones Trámite Particular
                 valido = True
                 if tipo_lic == "Día de Trámite":
                     hist_user = df_hist[df_hist['Legajo'].astype(str) == legajo_sel] if not df_hist.empty else pd.DataFrame()
@@ -203,7 +202,7 @@ elif opcion == "➕ Cargar Licencia":
                     }])
                     
                     df_actualizado = pd.concat([df_hist, nueva_fila], ignore_index=True)
-                    conn.update(worksheet="Historial_Licencias", data=df_actualizado)
+                    conn.update(spreadsheet=URL_SHEET, worksheet="Historial_Licencias", data=df_actualizado)
                     st.success(f"¡Licencia registrada con éxito! ({dias_habiles} días hábiles computados)")
                     st.cache_data.clear()
 
