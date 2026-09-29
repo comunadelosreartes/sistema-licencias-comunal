@@ -82,7 +82,7 @@ df_emp, df_saldos, df_hist, df_feriados, df_config = cargar_todas_las_solapas()
 # FUNCIONES AUXILIARES DE CÁLCULO Y EXTRACCIÓN DE DATOS
 # -----------------------------------------------------------------------------
 def obtener_dni_empleado(emp_info):
-    for col in ['DNI', 'D.N.I.', 'DOCUMENTO', 'DNI_NRO', 'NUMERO_DNI']:
+    for col in ['DNI', 'D.N.I./CUIL', 'DOCUMENTO', 'DNI_NRO', 'NUMERO_DNI']:
         if col in emp_info and pd.notna(emp_info[col]) and str(emp_info[col]).strip() != '':
             return str(emp_info[col]).strip()
     return ""
