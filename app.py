@@ -79,8 +79,14 @@ def cargar_todas_las_solapas():
 df_emp, df_saldos, df_hist, df_feriados, df_config = cargar_todas_las_solapas()
 
 # -----------------------------------------------------------------------------
-# FUNCIONES AUXILIARES DE CÁLCULO Y REGLAS
+# FUNCIONES AUXILIARES DE CÁLCULO Y EXTRACCIÓN DE DATOS
 # -----------------------------------------------------------------------------
+def obtener_dni_empleado(emp_info):
+    for col in ['DNI', 'D.N.I.', 'DOCUMENTO', 'DNI_NRO', 'NUMERO_DNI']:
+        if col in emp_info and pd.notna(emp_info[col]) and str(emp_info[col]).strip() != '':
+            return str(emp_info[col]).strip()
+    return ""
+
 def obtener_config(parametro, valor_default):
     if not df_config.empty and 'Parametro' in df_config.columns:
         res = df_config[df_config['Parametro'] == parametro]
@@ -95,7 +101,6 @@ MAX_TRAMITE_ANUAL = int(obtener_config("MAX_DIAS_TRAMITE_ANUAL", 8))
 
 def obtener_feriados_set():
     feriados = set()
-    # Feriados nacionales inamovibles base (para asegurar fechas clave como Navidad y Año Nuevo)
     anio_curr = date.today().year
     for y in range(anio_curr - 2, anio_curr + 3):
         feriados.add(date(y, 1, 1))   # Año Nuevo
@@ -204,6 +209,9 @@ def obtener_resumen_saldos_agente(legajo_sel, emp_info):
         resumen.append({"Periodo": p, "Asignados": int(asig), "Tomados": int(tomados), "Disponible": int(disp)})
     return resumen
 
+# -----------------------------------------------------------------------------
+# PLANTILLA DE IMPRESIÓN A4 OPTIMIZADA
+# -----------------------------------------------------------------------------
 def generar_html_impresion(legajo, nombre, dni, area, tipo_lic, periodo, dias, f_inicio, f_fin, obs):
     return f"""
     <!DOCTYPE html>
@@ -212,28 +220,28 @@ def generar_html_impresion(legajo, nombre, dni, area, tipo_lic, periodo, dias, f
     <meta charset="utf-8">
     <title>Formulario Unificado de Licencia</title>
     <style>
-        @page {{ size: A4; margin: 15mm; }}
-        body {{ font-family: Arial, sans-serif; font-size: 12px; color: #111; line-height: 1.4; margin: 0; padding: 15px; }}
-        .header {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #004080; padding-bottom: 10px; margin-bottom: 15px; }}
+        @page {{ size: A4; margin: 12mm; }}
+        body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #111; line-height: 1.45; margin: 0; padding: 10px; }}
+        .header {{ display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #004080; padding-bottom: 8px; margin-bottom: 12px; }}
         .header-left {{ font-size: 18px; font-weight: bold; color: #004080; }}
-        .header-right {{ text-align: right; font-size: 12px; color: #444; }}
-        .doc-title {{ text-align: center; background-color: #f0f4f8; padding: 8px; border: 1px solid #004080; font-weight: bold; font-size: 13px; text-transform: uppercase; margin-bottom: 15px; }}
-        .section-header {{ font-size: 11px; font-weight: bold; background-color: #004080; color: white; padding: 4px 8px; text-transform: uppercase; margin-top: 15px; margin-bottom: 8px; }}
-        table {{ width: 100%; border-collapse: collapse; margin-bottom: 10px; }}
+        .header-right {{ text-align: right; font-size: 11px; color: #444; }}
+        .doc-title {{ text-align: center; background-color: #f0f4f8; padding: 6px; border: 1px solid #004080; font-weight: bold; font-size: 12px; text-transform: uppercase; margin-bottom: 12px; }}
+        .section-header {{ font-size: 11px; font-weight: bold; background-color: #004080; color: white; padding: 4px 8px; text-transform: uppercase; margin-top: 12px; margin-bottom: 6px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-bottom: 8px; }}
         td {{ padding: 5px 8px; vertical-align: top; border-bottom: 1px solid #eee; }}
         .label {{ font-weight: bold; width: 28%; color: #222; }}
-        .signatures {{ margin-top: 45px; display: flex; justify-content: space-between; }}
-        .sig-box {{ width: 45%; text-align: center; font-size: 11px; }}
-        .sig-line {{ border-top: 1px dashed #333; margin-top: 45px; margin-bottom: 5px; }}
-        .footer {{ position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 9px; color: #666; border-top: 1px solid #ccc; padding-top: 5px; }}
+        .signatures {{ margin-top: 50px; display: flex; justify-content: space-between; align-items: flex-end; padding-bottom: 20px; }}
+        .sig-box {{ width: 44%; text-align: center; font-size: 11px; }}
+        .sig-line {{ border-top: 1px dashed #333; margin-top: 55px; margin-bottom: 6px; }}
+        .footer {{ position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 9px; color: #666; border-top: 1px solid #ccc; padding-top: 4px; }}
         @media print {{
             .no-print {{ display: none; }}
         }}
     </style>
     </head>
     <body>
-        <div class="no-print" style="margin-bottom: 15px;">
-            <button onclick="window.print()" style="padding: 10px 20px; background-color: #004080; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">🖨️ Imprimir Formulario A4</button>
+        <div class="no-print" style="margin-bottom: 12px;">
+            <button onclick="window.print()" style="padding: 10px 22px; background-color: #004080; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; font-weight: bold;">🖨️ Imprimir Formulario A4</button>
         </div>
 
         <div class="header">
@@ -245,17 +253,17 @@ def generar_html_impresion(legajo, nombre, dni, area, tipo_lic, periodo, dias, f
         </div>
 
         <div class="doc-title">Formulario Unificado de Solicitud y Autorización de Licencia</div>
-        <p style="text-align: right; margin-bottom: 15px;"><strong>Fecha de Emisión:</strong> {date.today().strftime('%d/%m/%Y')}</p>
+        <p style="text-align: right; margin-bottom: 10px; font-size: 11px;"><strong>Fecha de Emisión:</strong> {date.today().strftime('%d/%m/%Y')}</p>
 
         <div class="section-header">1. Datos del Agente Solicitante</div>
         <table>
-            <tr><td class="label">Legajo N°:</td><td>{legajo}</td><td class="label">D.N.I. N°:</td><td>{dni}</td></tr>
+            <tr><td class="label">Legajo N°:</td><td>{legajo}</td><td class="label">D.N.I. N°:</td><td><strong>{dni}</strong></td></tr>
             <tr><td class="label">Apellido y Nombre:</td><td colspan="3"><strong>{nombre}</strong></td></tr>
             <tr><td class="label">Área / Sector:</td><td colspan="3">{area}</td></tr>
         </table>
 
         <div class="section-header">2. Detalle de la Solicitud de Licencia</div>
-        <p>Por medio de la presente, el/la agente arriba consignado/a solicita formalmente la concesión de licencia según el siguiente detalle:</p>
+        <p style="margin-top: 4px; margin-bottom: 6px;">Por medio de la presente, el/la agente arriba consignado/a solicita formalmente la concesión de licencia según el siguiente detalle:</p>
         <table>
             <tr><td class="label">Tipo de Licencia:</td><td>{tipo_lic}</td></tr>
             <tr><td class="label">Período(s) Correspondiente(s):</td><td>{periodo}</td></tr>
@@ -264,24 +272,23 @@ def generar_html_impresion(legajo, nombre, dni, area, tipo_lic, periodo, dias, f
             <tr><td class="label">Observaciones / Ref:</td><td>{obs if obs else 'Sin observaciones'}</td></tr>
         </table>
 
-        <div style="margin-top: 35px; text-align: right;">
-            <div style="display: inline-block; width: 230px; text-align: center;">
-                <div style="border-top: 1px solid #333; margin-top: 35px;"></div>
+        <div style="margin-top: 25px; text-align: right;">
+            <div style="display: inline-block; width: 280px; text-align: center;">
+                <div style="border-top: 1px solid #333; margin-top: 40px; margin-bottom: 6px;"></div>
                 <strong>FIRMA DEL AGENTE</strong><br>
                 Aclaración: {nombre}<br>
-                D.N.I. N°: {dni}
+                D.N.I. N°: <strong>{dni}</strong>
             </div>
         </div>
 
         <div class="section-header">3. Constancia de Autorización Comunal</div>
-        <p>En la fecha arriba indicada, habiéndose constatado el cumplimiento de los requisitos normativos y la disponibilidad de días según registros oficiales, se OTORGA Y AUTORIZA la licencia solicitada.</p>
+        <p style="margin-top: 4px; margin-bottom: 10px;">En la fecha arriba indicada, habiéndose constatado el cumplimiento de los requisitos normativos y la disponibilidad de días según registros oficiales, se OTORGA Y AUTORIZA la licencia solicitada.</p>
 
         <div class="signatures">
             <div class="sig-box">
                 <div class="sig-line"></div>
                 <strong>JEFE / DIRECTOR DE ÁREA</strong><br>
-                Aclaración: ............................................<br>
-                Cargo: ....................................................
+                <div style="margin-top: 6px;">Aclaración: ....................................................</div>
             </div>
             <div class="sig-box">
                 <div class="sig-line"></div>
@@ -328,11 +335,13 @@ if opcion == "📜 Historial y Saldos por Legajo":
         
         if legajo_sel:
             emp_info = df_emp_activos[df_emp_activos['LEGAJO'] == legajo_sel].iloc[0]
+            dni_emp = obtener_dni_empleado(emp_info)
+            
             st.subheader(f"👤 {emp_info['NOMBRE_COMPLETO']} (Legajo: {legajo_sel})")
             
             c1, c2, c3 = st.columns(3)
             c1.metric("Área / Sector", str(emp_info.get('AREA', 'N/A')))
-            c2.metric("D.N.I.", str(emp_info.get('DNI', 'N/A')))
+            c2.metric("D.N.I.", str(dni_emp if dni_emp else 'N/A'))
             c3.metric("Fecha Antigüedad", str(emp_info.get('FECHA ANTIGUEDAD', 'N/A')))
             
             st.divider()
@@ -374,7 +383,7 @@ if opcion == "📜 Historial y Saldos por Legajo":
                     html_doc = generar_html_impresion(
                         legajo=str(legajo_sel),
                         nombre=str(emp_info['NOMBRE_COMPLETO']),
-                        dni=str(emp_info.get('DNI', '')),
+                        dni=str(dni_emp),
                         area=str(emp_info.get('AREA', '')),
                         tipo_lic=str(lic_sel.get('Tipo_Licencia', '')),
                         periodo=str(lic_sel.get('Periodo', date.today().year)),
@@ -399,6 +408,7 @@ elif opcion == "➕ Cargar Licencia":
         
         legajo_sel = st.selectbox("Empleado / Agente:", options=list(opciones_empleados.keys()), format_func=lambda x: opciones_empleados[x])
         emp_info = df_emp_activos[df_emp_activos['LEGAJO'] == legajo_sel].iloc[0]
+        dni_emp = obtener_dni_empleado(emp_info)
         
         # ---------------------------------------------------------------------
         # TARJETA DE SALDOS DISPONIBLES EN TIEMPO REAL
@@ -420,7 +430,6 @@ elif opcion == "➕ Cargar Licencia":
         col_t1, col_t2 = st.columns(2)
         tipo_lic = col_t1.selectbox("Tipo de Licencia:", ["Vacaciones", "Día de Trámite", "Licencia Médica", "Razones Particulares", "Otra"])
         
-        # Selección de período dinámica con etiquetas de saldo disponible
         opciones_periodo = {}
         for r in resumen_saldos:
             p_val = str(r['Periodo'])
@@ -432,7 +441,6 @@ elif opcion == "➕ Cargar Licencia":
             format_func=lambda x: opciones_periodo[x]
         )
         
-        # Modalidad de Selección de Fechas
         modo_fechas = st.radio("Modalidad de Cálculo de Fechas:", ["Por Rango (Desde / Hasta)", "Por Cantidad de Días Hábiles (Desde + N° Días)"], horizontal=True)
         
         if modo_fechas == "Por Rango (Desde / Hasta)":
@@ -464,7 +472,6 @@ elif opcion == "➕ Cargar Licencia":
         col_p2.metric("Fecha Fin (inclusive)", f_fin.strftime("%d/%m/%Y"))
         col_p3.metric("Días Hábiles Computados", f"{dias_habiles} día(s)")
 
-        # Validación contra saldo disponible
         saldo_periodo_sel = next((r['Disponible'] for r in resumen_saldos if str(r['Periodo']) == str(periodo_lic)), 0)
         if tipo_lic == "Vacaciones" and dias_habiles > saldo_periodo_sel:
             st.warning(f"⚠️ **Atención:** La cantidad solicitada ({dias_habiles} días) supera el saldo disponible para el período {periodo_lic} ({saldo_periodo_sel} días).")
@@ -506,7 +513,7 @@ elif opcion == "➕ Cargar Licencia":
                     st.session_state['ultima_licencia'] = {
                         "legajo": str(legajo_sel),
                         "nombre": str(emp_info['NOMBRE_COMPLETO']),
-                        "dni": str(emp_info.get('DNI', '')),
+                        "dni": str(dni_emp),
                         "area": str(emp_info.get('AREA', '')),
                         "tipo_lic": tipo_lic,
                         "periodo": str(periodo_lic),
