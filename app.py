@@ -1,196 +1,216 @@
 import streamlit as st
+from streamlit_gsheets import GSheetsConnection
 import pandas as pd
-from datetime import date
-from google.oauth2.service_account import Credentials
-import gspread
+import numpy as np
+from datetime import datetime, date
 
-# -----------------------------------------------------------------------------
-# CONFIGURACIÓN DE PÁGINA
-# -----------------------------------------------------------------------------
-st.set_page_config(
-    page_title="Sistema Comunal de Licencias",
-    page_icon="📜",
-    layout="wide"
-)
+# Configuración de página
+st.set_page_config(page_title="Sistema de Licencias Comunal", page_icon="📜", layout="wide")
 
-# -----------------------------------------------------------------------------
-# CONEXIÓN A GOOGLE SHEETS
-# -----------------------------------------------------------------------------
-@st.cache_resource
-def obtener_cliente_gspread():
-    try:
-        sa_info = dict(st.secrets["service_account"])
-        
-        # Corregir saltos de línea de la private_key
-        if "private_key" in sa_info:
-            key = sa_info["private_key"]
-            key = key.replace("\\n", "\n")
-            if not key.startswith("-----BEGIN PRIVATE KEY-----"):
-                key = "-----BEGIN PRIVATE KEY-----\n" + key
-            if not key.endswith("-----END PRIVATE KEY-----\n") and not key.endswith("-----END PRIVATE KEY-----"):
-                key = key + "\n-----END PRIVATE KEY-----\n"
-            sa_info["private_key"] = key
+# Conexión a Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds = Credentials.from_service_account_info(sa_info, scopes=scopes)
-        return gspread.authorize(creds)
-    except Exception as e:
-        st.error(f"Error de Autenticación: {e}")
-        return None
-
+@st.cache_data(ttl=60)
 def cargar_datos():
-    gc = obtener_cliente_gspread()
-    if not gc:
-        return pd.DataFrame()
+    # Carga de solapas
+    df_emp = conn.read(worksheet="Empleados")
+    df_saldos = conn.read(worksheet="Saldos_Iniciales")
+    df_hist = conn.read(worksheet="Historial_Licencias")
+    df_feriados = conn.read(worksheet="Feriados")
+    df_config = conn.read(worksheet="Configuracion")
     
+    return df_emp, df_saldos, df_hist, df_feriados, df_config
+
+try:
+    df_emp, df_saldos, df_hist, df_feriados, df_config = cargar_datos()
+except Exception as e:
+    st.error(f"Error al conectar con Google Sheets. Verifique la estructura de solapas: {e}")
+    st.stop()
+
+# --- HELPER FUNCTIONS ---
+
+def obtener_config(parametro, valor_default):
+    if not df_config.empty and 'Parametro' in df_config.columns:
+        res = df_config[df_config['Parametro'] == parametro]
+        if not res.empty:
+            return float(res.iloc[0]['Valor'])
+    return valor_default
+
+MAX_TRAMITE_ANUAL = int(obtener_config("MAX_DIAS_TRAMITE_ANUAL", 8))
+MAX_TRAMITE_MENSUAL = int(obtener_config("MAX_DIAS_TRAMITE_MENSUAL", 2))
+
+def obtener_feriados_set():
+    if not df_feriados.empty and 'Fecha' in df_feriados.columns:
+        return set(pd.to_datetime(df_feriados['Fecha']).dt.date)
+    return set()
+
+FERIADOS_SET = obtener_feriados_set()
+
+def calcular_dias_habiles(inicio, fin):
+    curr = inicio
+    dias = 0
+    while curr <= fin:
+        if curr.weekday() < 5 and curr not in FERIADOS_SET:
+            dias += 1
+        curr += pd.Timedelta(days=1)
+    return dias
+
+def calcular_dias_estatuto(fecha_antiguedad, anio_periodo):
+    if pd.isna(fecha_antiguedad):
+        return 15
     try:
-        sheet_url = st.secrets["spreadsheet_url"]
-        sh = gc.open_by_url(sheet_url)
-        worksheet = sh.worksheet("Historial_Licencias")
-        
-        # Leer filas
-        data = worksheet.get_all_records()
-        df = pd.DataFrame(data)
-        
-        if not df.empty and "Legajo" in df.columns:
-            df["Legajo"] = df["Legajo"].astype(str).str.strip()
-        return df
-    except Exception as e:
-        # Mostramos la excepción exacta para saber qué falta
-        st.error(f"Error detallado al leer la planilla: {type(e).__name__} - {e}")
-        return pd.DataFrame(columns=[
-            "Legajo", "Empleado", "Area", "Tipo_Licencia", 
-            "Periodo", "Fecha_Inicio", "Fecha_Fin", "Dias", "Observaciones"
-        ])
-df_licencias = cargar_datos()
+        fecha_ant = pd.to_datetime(fecha_antiguedad, format="%d/%m/%Y").date()
+    except:
+        try:
+            fecha_ant = pd.to_datetime(fecha_antiguedad).date()
+        except:
+            return 15
+            
+    corte = date(anio_periodo, 12, 31)
+    dias_ant = (corte - fecha_ant).days
+    anios = dias_ant / 365.25
 
-# -----------------------------------------------------------------------------
-# MENÚ LATERAL Y NAVEGACIÓN
-# -----------------------------------------------------------------------------
+    if anios < 0.5:
+        meses = max(1, int(np.ceil(dias_ant / 30.43)))
+        return min(meses, 15)
+    elif anios <= 5:
+        return 15
+    elif anios <= 10:
+        return 20
+    elif anios <= 15:
+        return 25
+    elif anios <= 25:
+        return 30
+    else:
+        return 35
+
+# --- MENU PRINCIPAL ---
 st.sidebar.title("📌 Menú Principal")
-opcion = st.sidebar.radio(
-    "Seleccione una opción:",
-    ["📜 Historial por Legajo", "➕ Cargar Licencia", "📊 Ver Base Completa"]
-)
+opcion = st.sidebar.radio("Seleccione una opción:", [
+    "📜 Historial y Saldos por Legajo",
+    "➕ Cargar Licencia",
+    "📊 Ver Base Completa"
+])
 
-# =============================================================================
-# OPCIÓN 1: HISTORIAL Y FICHA POR LEGAJO
-# =============================================================================
-if opcion == "📜 Historial por Legajo":
-    st.title("📜 Ficha Histórica de Licencias")
-    st.caption("Consulte el detalle de vacaciones y licencias gozadas por cada agente comunal.")
+# Limpieza y preparación de datos de empleados
+df_emp_activos = df_emp[df_emp['ACTIVO'].astype(str).str.upper() == 'SI'].copy() if 'ACTIVO' in df_emp.columns else df_emp.copy()
+df_emp_activos['LEGAJO'] = df_emp_activos['LEGAJO'].astype(str)
+df_emp_activos['NOMBRE_COMPLETO'] = df_emp_activos['APELLIDO'].astype(str) + ", " + df_emp_activos['NOMBRE'].astype(str)
 
-    if not df_licencias.empty and "Legajo" in df_licencias.columns and df_licencias["Legajo"].dropna().count() > 0:
-        df_licencias["Combo_Agente"] = df_licencias["Legajo"].astype(str) + " - " + df_licencias["Empleado"].astype(str)
-        lista_agentes = sorted(df_licencias["Combo_Agente"].unique().tolist())
-
-        col_search, _ = st.columns([2, 2])
-        with col_search:
-            agente_sel = st.selectbox("🔎 Buscar Agente (Legajo o Nombre):", options=lista_agentes)
-
-        legajo_elegido = agente_sel.split(" - ")[0].strip()
-        df_agente = df_licencias[df_licencias["Legajo"] == legajo_elegido].copy()
-
-        nombre_agente = df_agente["Empleado"].iloc[0] if not df_agente.empty else "N/A"
-        area_agente = df_agente["Area"].iloc[0] if ("Area" in df_agente.columns and not df_agente.empty) else "N/A"
-        total_dias = pd.to_numeric(df_agente["Dias"], errors="coerce").sum() if not df_agente.empty else 0
-
-        st.divider()
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("N° Legajo", legajo_elegido)
-        c2.metric("Área / Sector", area_agente)
-        c3.metric("Total Días Tomados (Histórico)", f"{int(total_dias)} días")
-
-        st.subheader(f"📋 Registros de {nombre_agente}")
+# --- OPCIÓN 1: HISTORIAL Y SALDOS POR LEGAJO ---
+if opcion == "📜 Historial y Saldos por Legajo":
+    st.title("📜 Ficha de Licencias y Saldos Disponibles")
+    
+    opciones_empleados = dict(zip(df_emp_activos['LEGAJO'], df_emp_activos['LEGAJO'] + " - " + df_emp_activos['NOMBRE_COMPLETO']))
+    legajo_sel = st.selectbox("Seleccione un Agente:", options=list(opciones_empleados.keys()), format_func=lambda x: opciones_empleados[x])
+    
+    if legajo_sel:
+        emp_info = df_emp_activos[df_emp_activos['LEGAJO'] == legajo_sel].iloc[0]
+        st.subheader(f"👤 {emp_info['NOMBRE_COMPLETO']} (Legajo: {legajo_sel})")
         
-        columnas_visibles = ["Periodo", "Tipo_Licencia", "Fecha_Inicio", "Fecha_Fin", "Dias", "Observaciones"]
-        df_mostrar = df_agente[columnas_visibles].sort_values(by="Periodo", ascending=False)
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Área", str(emp_info.get('AREA', 'N/A')))
+        col2.metric("Fecha Antigüedad", str(emp_info.get('FECHA ANTIGUEDAD', 'N/A')))
         
-        st.dataframe(
-            df_mostrar,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Periodo": "Período / Año",
-                "Tipo_Licencia": "Tipo",
-                "Fecha_Inicio": "Desde",
-                "Fecha_Fin": "Hasta",
-                "Dias": "Días",
-                "Observaciones": "Observaciones / Ref."
-            }
-        )
-    else:
-        st.info("💡 La base de datos está conectada pero aún no tiene licencias cargadas. Usá la opción '➕ Cargar Licencia' para agregar la primera.")
+        # Cálculo de Saldos
+        saldos_user = df_saldos[df_saldos['Legajo'].astype(str) == legajo_sel].copy() if not df_saldos.empty else pd.DataFrame()
+        hist_user = df_hist[df_hist['Legajo'].astype(str) == legajo_sel].copy() if not df_hist.empty else pd.DataFrame()
+        
+        st.markdown("---")
+        st.subheader("🟢 Estado de Saldos de Vacaciones")
+        
+        # Agrupar tomados por período
+        tomados_por_periodo = {}
+        if not hist_user.empty and 'Tipo_Licencia' in hist_user.columns:
+            vacs = hist_user[hist_user['Tipo_Licencia'] == 'Vacaciones']
+            if not vacs.empty and 'Periodo' in vacs.columns:
+                tomados_por_periodo = vacs.groupby('Periodo')['Dias'].sum().to_dict()
+                
+        periodos = sorted(list(set(saldos_user['Periodo'].tolist() if not saldos_user.empty else [2024, 2025, 2026])))
+        
+        resumen_saldos = []
+        for p in periodos:
+            p = int(p)
+            asig = saldos_user[saldos_user['Periodo'] == p]['Dias_Asignados'].sum() if not saldos_user.empty and p in saldos_user['Periodo'].values else calcular_dias_estatuto(emp_info.get('FECHA ANTIGUEDAD'), p)
+            tomados = tomados_por_periodo.get(p, 0)
+            disp = asig - tomados
+            resumen_saldos.append({"Período": p, "Asignados": asig, "Tomados": tomados, "Disponible": disp})
+            
+        df_res_saldos = pd.DataFrame(resumen_saldos)
+        st.dataframe(df_res_saldos, use_container_width=True)
+        
+        # Control Trámites
+        if not hist_user.empty and 'Tipo_Licencia' in hist_user.columns:
+            tramites_anio = hist_user[(hist_user['Tipo_Licencia'] == 'Día de Trámite') & (pd.to_datetime(hist_user['Fecha_Inicio']).dt.year == date.today().year)]['Dias'].sum()
+        else:
+            tramites_anio = 0
+            
+        st.info(f"📋 **Días de Trámite tomados en {date.today().year}:** {tramites_anio} / {MAX_TRAMITE_ANUAL} días máximos anuales.")
 
-# =============================================================================
-# OPCIÓN 2: FORMULARIO DE CARGA DE LICENCIA
-# =============================================================================
+        st.markdown("---")
+        st.subheader("📜 Historial de Licencias Consumidas")
+        if not hist_user.empty:
+            st.dataframe(hist_user[['Fecha_Inicio', 'Fecha_Fin', 'Dias', 'Tipo_Licencia', 'Periodo', 'Observaciones']], use_container_width=True)
+        else:
+            st.write("No hay licencias registradas para este legajo.")
+
+# --- OPCIÓN 2: CARGAR LICENCIA ---
 elif opcion == "➕ Cargar Licencia":
-    st.title("➕ Registrar Nueva Licencia / Período Histórico")
-    st.caption("Asiente períodos de vacaciones pasados o licencias vigentes en la base general.")
-
-    with st.form("form_licencia", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-        with col1:
-            legajo_in = st.text_input("N° de Legajo:")
-            nombre_in = st.text_input("Nombre y Apellido del Empleado:")
-            area_in = st.text_input("Área / Sector:", value="Obras Públicas")
-        with col2:
-            tipo_in = st.selectbox(
-                "Tipo de Licencia:", 
-                ["Ordinaria / Vacaciones", "Razones Particulares", "Salud / Médica", "Especial"]
-            )
-            periodo_in = st.text_input("Período / Año al que corresponde:", value="2024")
-            dias_in = st.number_input("Días Tomados:", min_value=1, max_value=60, value=14)
-
-        col3, col4 = st.columns(2)
-        with col3:
-            f_inicio_in = st.date_input("Fecha Inicio (Desde):", value=date.today())
-        with col4:
-            f_fin_in = st.date_input("Fecha Fin (Hasta):", value=date.today())
-
-        obs_in = st.text_input("Observaciones / N° Resolución o Nota:", placeholder="Ej: Tramo completo")
-
-        btn_guardar = st.form_submit_button("💾 Guardar Licencia en Google Sheets", type="primary")
-
-        if btn_guardar:
-            if not legajo_in.strip() or not nombre_in.strip():
-                st.error("⚠️ El Legajo y el Nombre del Empleado son obligatorios.")
+    st.title("➕ Registrar Nueva Licencia")
+    
+    opciones_empleados = dict(zip(df_emp_activos['LEGAJO'], df_emp_activos['LEGAJO'] + " - " + df_emp_activos['NOMBRE_COMPLETO']))
+    
+    with st.form("form_licencia"):
+        legajo_sel = st.selectbox("Empleado:", options=list(opciones_empleados.keys()), format_func=lambda x: opciones_empleados[x])
+        tipo_lic = st.selectbox("Tipo de Licencia:", ["Vacaciones", "Día de Trámite", "Licencia Médica", "Razones Particulares", "Otra"])
+        
+        col_f1, col_f2 = st.columns(2)
+        f_inicio = col_f1.date_input("Fecha de Inicio:", value=date.today())
+        f_fin = col_f2.date_input("Fecha de Fin:", value=date.today())
+        
+        obs = st.text_input("Observaciones:")
+        
+        submitted = st.form_submit_button("💾 Guardar Licencia en Google Sheets")
+        
+        if submitted:
+            if f_fin < f_inicio:
+                st.error("La fecha de fin no puede ser anterior a la fecha de inicio.")
             else:
-                nuevo_registro = [
-                    legajo_in.strip(),
-                    nombre_in.strip(),
-                    area_in.strip(),
-                    tipo_in,
-                    periodo_in.strip(),
-                    f_inicio_in.strftime("%Y-%m-%d"),
-                    f_fin_in.strftime("%Y-%m-%d"),
-                    int(dias_in),
-                    obs_in.strip()
-                ]
+                dias_habiles = calcular_dias_habiles(f_inicio, f_fin)
+                emp_info = df_emp_activos[df_emp_activos['LEGAJO'] == legajo_sel].iloc[0]
+                
+                # Validaciones Trámite Particular
+                valido = True
+                if tipo_lic == "Día de Trámite":
+                    hist_user = df_hist[df_hist['Legajo'].astype(str) == legajo_sel] if not df_hist.empty else pd.DataFrame()
+                    if not hist_user.empty:
+                        tramites_anio = hist_user[(hist_user['Tipo_Licencia'] == 'Día de Trámite') & (pd.to_datetime(hist_user['Fecha_Inicio']).dt.year == f_inicio.year)]['Dias'].sum()
+                        if tramites_anio + dias_habiles > MAX_TRAMITE_ANUAL:
+                            st.error(f"Supera el máximo anual de Días de Trámite ({MAX_TRAMITE_ANUAL} días). Ya posee {tramites_anio} tomados.")
+                            valido = False
+                            
+                if valido:
+                    nueva_fila = pd.DataFrame([{
+                        "Legajo": legajo_sel,
+                        "Empleado": emp_info['NOMBRE_COMPLETO'],
+                        "Area": emp_info.get('AREA', ''),
+                        "Tipo_Licencia": tipo_lic,
+                        "Periodo": f_inicio.year,
+                        "Fecha_Inicio": f_inicio.strftime("%Y-%m-%d"),
+                        "Fecha_Fin": f_fin.strftime("%Y-%m-%d"),
+                        "Dias": dias_habiles,
+                        "Observaciones": obs
+                    }])
+                    
+                    df_actualizado = pd.concat([df_hist, nueva_fila], ignore_index=True)
+                    conn.update(worksheet="Historial_Licencias", data=df_actualizado)
+                    st.success(f"¡Licencia registrada con éxito! ({dias_habiles} días hábiles computados)")
+                    st.cache_data.clear()
 
-                try:
-                    gc = obtener_cliente_gspread()
-                    sh = gc.open_by_url(st.secrets["spreadsheet_url"])
-                    ws = sh.worksheet("Historial_Licencias")
-                    ws.append_row(nuevo_registro)
-                    st.success(f"🎉 ¡Licencia registrada correctamente para {nombre_in.strip()}!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error al guardar en Google Sheets: {e}")
-
-# =============================================================================
-# OPCIÓN 3: VER BASE COMPLETA
-# =============================================================================
+# --- OPCIÓN 3: VER BASE COMPLETA ---
 elif opcion == "📊 Ver Base Completa":
-    st.title("📊 Base Completa de Licencias")
-    st.caption("Visión global de todos los registros asentados en el sistema.")
-
-    if not df_licencias.empty:
-        st.dataframe(df_licencias, use_container_width=True, hide_index=True)
+    st.title("📊 Base Completa de Licencias Registradas")
+    if not df_hist.empty:
+        st.dataframe(df_hist, use_container_width=True)
     else:
-        st.info("La base de datos no contiene registros.")
+        st.info("Aún no hay licencias cargadas en la base de datos.")
