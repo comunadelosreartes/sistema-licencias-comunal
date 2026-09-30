@@ -186,7 +186,8 @@ def obtener_resumen_saldos_agente(legajo_sel, emp_info):
     tomados_por_periodo = {}
     if not hist_user.empty and 'Tipo_Licencia' in hist_user.columns:
         hist_user['Dias'] = pd.to_numeric(hist_user['Dias'], errors='coerce').fillna(0)
-        vacs = hist_user[hist_user['Tipo_Licencia'].astype(str).str.contains("Vacaciones|Ordinaria", case=False, na=False)]
+        # Incluye Vacaciones y Compensaciones Económicas / Pagos
+        vacs = hist_user[hist_user['Tipo_Licencia'].astype(str).str.contains("Vacaciones|Ordinaria|Compensación|Pago", case=False, na=False)]
         if not vacs.empty and 'Periodo' in vacs.columns:
             tomados_por_periodo = vacs.groupby('Periodo')['Dias'].sum().to_dict()
             
@@ -213,12 +214,16 @@ def obtener_resumen_saldos_agente(legajo_sel, emp_info):
 # PLANTILLA DE IMPRESIÓN A4 OPTIMIZADA
 # -----------------------------------------------------------------------------
 def generar_html_impresion(legajo, nombre, dni, area, tipo_lic, periodo, dias, f_inicio, f_fin, obs):
+    titulo_doc = "Formulario Unificado de Solicitud y Autorización de Licencia"
+    if "Compensación" in tipo_lic or "Pago" in tipo_lic:
+        titulo_doc = "Constancia de Liquidación / Compensación Económica de Licencia"
+
     return f"""
     <!DOCTYPE html>
     <html>
     <head>
     <meta charset="utf-8">
-    <title>Formulario Unificado de Licencia</title>
+    <title>{titulo_doc}</title>
     <style>
         @page {{ size: A4; margin: 12mm; }}
         body {{ font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #111; line-height: 1.45; margin: 0; padding: 10px; }}
@@ -252,7 +257,7 @@ def generar_html_impresion(legajo, nombre, dni, area, tipo_lic, periodo, dias, f
             </div>
         </div>
 
-        <div class="doc-title">Formulario Unificado de Solicitud y Autorización de Licencia</div>
+        <div class="doc-title">{titulo_doc}</div>
         <p style="text-align: right; margin-bottom: 10px; font-size: 11px;"><strong>Fecha de Emisión:</strong> {date.today().strftime('%d/%m/%Y')}</p>
 
         <div class="section-header">1. Datos del Agente Solicitante</div>
@@ -262,13 +267,13 @@ def generar_html_impresion(legajo, nombre, dni, area, tipo_lic, periodo, dias, f
             <tr><td class="label">Área / Sector:</td><td colspan="3">{area}</td></tr>
         </table>
 
-        <div class="section-header">2. Detalle de la Solicitud de Licencia</div>
-        <p style="margin-top: 4px; margin-bottom: 6px;">Por medio de la presente, el/la agente arriba consignado/a solicita formalmente la concesión de licencia según el siguiente detalle:</p>
+        <div class="section-header">2. Detalle del Tramite</div>
+        <p style="margin-top: 4px; margin-bottom: 6px;">Por medio de la presente, se deja constancia del trámite según el siguiente detalle:</p>
         <table>
-            <tr><td class="label">Tipo de Licencia:</td><td>{tipo_lic}</td></tr>
+            <tr><td class="label">Tipo de Tramite:</td><td>{tipo_lic}</td></tr>
             <tr><td class="label">Período(s) Correspondiente(s):</td><td>{periodo}</td></tr>
-            <tr><td class="label">Cantidad Computada:</td><td><strong>{dias} día(s) hábil(es)</strong></td></tr>
-            <tr><td class="label">Vigencia:</td><td>Desde el día <strong>{f_inicio}</strong> hasta el día <strong>{f_fin}</strong> inclusive.</td></tr>
+            <tr><td class="label">Cantidad Computada:</td><td><strong>{dias} día(s)</strong></td></tr>
+            <tr><td class="label">Fecha / Vigencia:</td><td>Desde el día <strong>{f_inicio}</strong> hasta el día <strong>{f_fin}</strong> inclusive.</td></tr>
             <tr><td class="label">Observaciones / Ref:</td><td>{obs if obs else 'Sin observaciones'}</td></tr>
         </table>
 
@@ -282,7 +287,7 @@ def generar_html_impresion(legajo, nombre, dni, area, tipo_lic, periodo, dias, f
         </div>
 
         <div class="section-header">3. Constancia de Autorización Comunal</div>
-        <p style="margin-top: 4px; margin-bottom: 10px;">En la fecha arriba indicada, habiéndose constatado el cumplimiento de los requisitos normativos y la disponibilidad de días según registros oficiales, se OTORGA Y AUTORIZA la licencia solicitada.</p>
+        <p style="margin-top: 4px; margin-bottom: 10px;">En la fecha arriba indicada, habiéndose constatado el cumplimiento de los requisitos normativos, se OTORGA Y AUTORIZA el presente trámite.</p>
 
         <div class="signatures">
             <div class="sig-box">
@@ -327,7 +332,7 @@ else:
 # =============================================================================
 if opcion == "📜 Historial y Saldos por Legajo":
     st.title("📜 Ficha de Licencias y Saldos Disponibles")
-    st.caption("Consulte el saldo de vacaciones según estatuto y el historial de licencias gozadas.")
+    st.caption("Consulte el saldo de vacaciones según estatuto y el historial de licencias gozadas o abonadas.")
 
     if not df_emp_activos.empty:
         opciones_empleados = dict(zip(df_emp_activos['LEGAJO'], df_emp_activos['LEGAJO'] + " - " + df_emp_activos['NOMBRE_COMPLETO']))
@@ -400,8 +405,8 @@ if opcion == "📜 Historial y Saldos por Legajo":
 # OPCIÓN 2: FORMULARIO DE CARGA DE LICENCIA CON PREVIEW E IMPRESIÓN
 # =============================================================================
 elif opcion == "➕ Cargar Licencia":
-    st.title("➕ Registrar Nueva Licencia")
-    st.caption("Asiente solicitudes de licencias con cálculo de saldos y feriados automatizado.")
+    st.title("➕ Registrar Nueva Licencia / Compensación Económica")
+    st.caption("Asiente solicitudes de licencias o liquidación de días acumulados.")
 
     if not df_emp_activos.empty:
         opciones_empleados = dict(zip(df_emp_activos['LEGAJO'], df_emp_activos['LEGAJO'] + " - " + df_emp_activos['NOMBRE_COMPLETO']))
@@ -421,14 +426,17 @@ elif opcion == "➕ Cargar Licencia":
             cols_saldos[idx].metric(
                 label=f"Período {r['Periodo']}",
                 value=f"{r['Disponible']} días",
-                delta=f"Tomados: {r['Tomados']} / {r['Asignados']}",
+                delta=f"Tomados/Abonados: {r['Tomados']} / {r['Asignados']}",
                 delta_color="normal"
             )
         
         st.divider()
 
         col_t1, col_t2 = st.columns(2)
-        tipo_lic = col_t1.selectbox("Tipo de Licencia:", ["Vacaciones", "Día de Trámite", "Licencia Médica", "Razones Particulares", "Otra"])
+        tipo_lic = col_t1.selectbox(
+            "Tipo de Licencia / Concepto:", 
+            ["Vacaciones", "Compensación Económica / Pago de Vacaciones", "Día de Trámite", "Licencia Médica", "Razones Particulares", "Otra"]
+        )
         
         opciones_periodo = {}
         for r in resumen_saldos:
@@ -440,26 +448,35 @@ elif opcion == "➕ Cargar Licencia":
             options=list(opciones_periodo.keys()),
             format_func=lambda x: opciones_periodo[x]
         )
-        
-        modo_fechas = st.radio("Modalidad de Cálculo de Fechas:", ["Por Rango (Desde / Hasta)", "Por Cantidad de Días Hábiles (Desde + N° Días)"], horizontal=True)
-        
-        if modo_fechas == "Por Rango (Desde / Hasta)":
-            col_f1, col_f2 = st.columns(2)
-            f_inicio = col_f1.date_input("Fecha de Inicio (Desde):", value=date.today())
-            f_fin = col_f2.date_input("Fecha de Fin (Hasta):", value=date.today())
-            if f_fin >= f_inicio:
-                dias_habiles = calcular_dias_habiles(f_inicio, f_fin)
-            else:
-                st.error("⚠️ La fecha final debe ser posterior a la fecha de inicio.")
-                dias_habiles = 0
-        else:
-            col_f1, col_f2 = st.columns(2)
-            f_inicio = col_f1.date_input("Fecha de Inicio (Desde):", value=date.today())
-            cant_dias_input = col_f2.number_input("Cantidad de Días Hábiles a solicitar:", min_value=1, max_value=60, value=1, step=1)
-            f_fin = calcular_fecha_fin_por_dias(f_inicio, cant_dias_input)
-            dias_habiles = cant_dias_input
 
-        obs = st.text_input("Observaciones / N° Resolución o Nota:")
+        if tipo_lic == "Compensación Económica / Pago de Vacaciones":
+            col_f1, col_f2 = st.columns(2)
+            f_pago = col_f1.date_input("Fecha del Trámite / Registro:", value=date.today())
+            cant_dias_input = col_f2.number_input("Cantidad de Días a Abonar/Liquidar:", min_value=1, max_value=60, value=1, step=1)
+            
+            f_inicio = f_pago
+            f_fin = f_pago
+            dias_habiles = cant_dias_input
+        else:
+            modo_fechas = st.radio("Modalidad de Cálculo de Fechas:", ["Por Rango (Desde / Hasta)", "Por Cantidad de Días Hábiles (Desde + N° Días)"], horizontal=True)
+            
+            if modo_fechas == "Por Rango (Desde / Hasta)":
+                col_f1, col_f2 = st.columns(2)
+                f_inicio = col_f1.date_input("Fecha de Inicio (Desde):", value=date.today())
+                f_fin = col_f2.date_input("Fecha de Fin (Hasta):", value=date.today())
+                if f_fin >= f_inicio:
+                    dias_habiles = calcular_dias_habiles(f_inicio, f_fin)
+                else:
+                    st.error("⚠️ La fecha final debe ser posterior a la fecha de inicio.")
+                    dias_habiles = 0
+            else:
+                col_f1, col_f2 = st.columns(2)
+                f_inicio = col_f1.date_input("Fecha de Inicio (Desde):", value=date.today())
+                cant_dias_input = col_f2.number_input("Cantidad de Días Hábiles a solicitar:", min_value=1, max_value=60, value=1, step=1)
+                f_fin = calcular_fecha_fin_por_dias(f_inicio, cant_dias_input)
+                dias_habiles = cant_dias_input
+
+        obs = st.text_input("Observaciones / N° Resolución o Nota:", placeholder="Ej: Abonado según Res. Comunal N° 45/2026" if "Compensación" in tipo_lic else "")
         
         # ---------------------------------------------------------------------
         # BANNER / TARJETA DE PREVIEW ANTES DE GUARDAR
@@ -468,13 +485,13 @@ elif opcion == "➕ Cargar Licencia":
         st.subheader("📋 Resumen Previo de la Solicitud")
         
         col_p1, col_p2, col_p3 = st.columns(3)
-        col_p1.metric("Fecha Inicio", f_inicio.strftime("%d/%m/%Y"))
-        col_p2.metric("Fecha Fin (inclusive)", f_fin.strftime("%d/%m/%Y"))
-        col_p3.metric("Días Hábiles Computados", f"{dias_habiles} día(s)")
+        col_p1.metric("Fecha Inicio / Trámite", f_inicio.strftime("%d/%m/%Y"))
+        col_p2.metric("Fecha Fin", f_fin.strftime("%d/%m/%Y"))
+        col_p3.metric("Días Computados / Abonados", f"{dias_habiles} día(s)")
 
         saldo_periodo_sel = next((r['Disponible'] for r in resumen_saldos if str(r['Periodo']) == str(periodo_lic)), 0)
-        if tipo_lic == "Vacaciones" and dias_habiles > saldo_periodo_sel:
-            st.warning(f"⚠️ **Atención:** La cantidad solicitada ({dias_habiles} días) supera el saldo disponible para el período {periodo_lic} ({saldo_periodo_sel} días).")
+        if (tipo_lic == "Vacaciones" or "Compensación" in tipo_lic) and dias_habiles > saldo_periodo_sel:
+            st.warning(f"⚠️ **Atención:** La cantidad ingresada ({dias_habiles} días) supera el saldo disponible para el período {periodo_lic} ({saldo_periodo_sel} días).")
 
         if tipo_lic == "Día de Trámite":
             hist_user = df_hist[df_hist['Legajo'] == legajo_sel] if not df_hist.empty else pd.DataFrame()
@@ -488,9 +505,9 @@ elif opcion == "➕ Cargar Licencia":
                     st.warning(f"⚠️ **Alerta:** Con esta solicitud superará el máximo anual de Días de Trámite ({MAX_TRAMITE_ANUAL} días). Actualmente registra {int(tramites_anio)} días tomados.")
 
         # Guardar en Google Sheets
-        if st.button("💾 Guardar Licencia en Google Sheets", type="primary"):
+        if st.button("💾 Guardar Registro en Google Sheets", type="primary"):
             if f_fin < f_inicio:
-                st.error("No se puede guardar una licencia con fecha de fin anterior a la fecha de inicio.")
+                st.error("No se puede guardar un registro con fecha de fin anterior a la fecha de inicio.")
             else:
                 nuevo_registro = [
                     str(legajo_sel),
@@ -509,7 +526,7 @@ elif opcion == "➕ Cargar Licencia":
                     sh = gc.open_by_url(st.secrets["spreadsheet_url"])
                     ws = sh.worksheet("Historial_Licencias")
                     ws.append_row(nuevo_registro)
-                    st.success(f"🎉 ¡Licencia registrada correctamente en Google Sheets! ({dias_habiles} días hábiles computados)")
+                    st.success(f"🎉 ¡Registro guardado correctamente en Google Sheets! ({dias_habiles} días computados)")
                     st.session_state['ultima_licencia'] = {
                         "legajo": str(legajo_sel),
                         "nombre": str(emp_info['NOMBRE_COMPLETO']),
@@ -529,7 +546,7 @@ elif opcion == "➕ Cargar Licencia":
         # Si recién se guardó una licencia, mostramos la opción de impresión inmediata
         if 'ultima_licencia' in st.session_state:
             st.divider()
-            st.subheader("🖨️ Generar y Descargar Autorización")
+            st.subheader("🖨️️ Generar y Descargar Documento")
             lic_data = st.session_state['ultima_licencia']
             
             html_doc = generar_html_impresion(
